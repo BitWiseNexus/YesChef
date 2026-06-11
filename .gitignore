@@ -1,0 +1,23 @@
+# Environments & secrets
+.env
+.venv/
+venv/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Runtime output
+audit.log
+*.log
+
+# Sandbox scratch space (keep the folder, ignore its contents)
+dummy_workspace/*
+!dummy_workspace/.gitkeep
+
+# OS / editor noise
+.DS_Store
+.idea/
+.vscode/

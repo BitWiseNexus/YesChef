@@ -1,0 +1,25 @@
+services:
+  chef:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: chef:latest
+    container_name: chef-sandbox
+    env_file:
+      - .env
+    # The ONLY host filesystem the agent can touch. Everything destructive
+    # it could ever be tricked into approving is confined to this folder.
+    volumes:
+      - ./dummy_workspace:/workspace
+    working_dir: /app
+    stdin_open: true   # keep stdin open for the wrapped interactive CLI
+    tty: true          # allocate a TTY so the child renders its prompts
+    # Defense in depth: no privilege escalation, minimal capabilities,
+    # bounded resources so a runaway child cannot starve the host.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 2g
+    pids_limit: 256
+    restart: "no"
