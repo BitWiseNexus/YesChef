@@ -51,6 +51,34 @@ async def test_unsafe_verdict_is_parsed(make_settings: Callable) -> None:
     assert result.verdict is Verdict.UNSAFE
 
 
+async def test_task_context_is_sent_to_model(make_settings: Callable) -> None:
+    """The user's task must reach the judge in the user message when provided."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["user"] = json.loads(request.content)["messages"][1]["content"]
+        return chat_completion(json.dumps({"decision": "SAFE", "reason": "matches task"}))
+
+    evaluator = make_evaluator(make_settings, handler)
+    result = await evaluator.evaluate("rm NOTES.md", task_context="delete NOTES.md")
+    assert "delete NOTES.md" in captured["user"]
+    assert "rm NOTES.md" in captured["user"]
+    assert result.verdict is Verdict.SAFE
+
+
+async def test_no_context_omits_task_line(make_settings: Callable) -> None:
+    """Without a task, the user message carries only the command."""
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["user"] = json.loads(request.content)["messages"][1]["content"]
+        return chat_completion(json.dumps({"decision": "UNSAFE", "reason": "no"}))
+
+    evaluator = make_evaluator(make_settings, handler)
+    await evaluator.evaluate("rm NOTES.md")
+    assert "User's task" not in captured["user"]
+
+
 async def test_retries_transient_errors_then_succeeds(make_settings: Callable) -> None:
     calls: List[int] = []
 

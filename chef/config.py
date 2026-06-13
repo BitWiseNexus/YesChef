@@ -43,6 +43,16 @@ class ChefSettings(BaseSettings):
         default="/workspace",
         description="Working directory for the child process (the sandboxed mount).",
     )
+    task_context: str = Field(
+        default="",
+        description=(
+            "Natural-language description of the task given to the agent, "
+            "passed to the Tier 2 judge as a hint so commands that clearly "
+            "serve the requested task can be approved. A hint only — it can "
+            "never override the blacklist or the hard-unsafe categories. "
+            "Auto-derived from the wrapped command's prompt when not set."
+        ),
+    )
     prompt_pattern: str = Field(
         default=(
             r"\(y/n\)|\(Y/n\)|\[y/N\]|\[Y/n\]"

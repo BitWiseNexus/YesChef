@@ -49,6 +49,38 @@ async def test_unknown_escalates_to_llm(make_settings: Callable) -> None:
     assert result.tier is Tier.LLM
 
 
+async def test_task_context_forwarded_to_llm(make_settings: Callable) -> None:
+    """The engine must pass its task context down to the LLM tier."""
+    settings = make_settings(llm_enabled=True, llm_api_key="test-key")
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["user"] = json.loads(request.content)["messages"][1]["content"]
+        content = json.dumps({"decision": "SAFE", "reason": "requested by user"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": content}}]})
+
+    client = httpx.AsyncClient(
+        base_url=settings.llm_base_url, transport=httpx.MockTransport(handler)
+    )
+    engine = EvaluationEngine(
+        settings, llm=LLMEvaluator(settings, client=client),
+        task_context="delete NOTES.md",
+    )
+    result = await engine.evaluate_async("rm NOTES.md")
+    assert result.approved
+    assert "delete NOTES.md" in seen["user"]
+
+
+async def test_blacklist_ignores_task_context(make_settings: Callable) -> None:
+    """Context must NOT rescue a blacklisted command — Tier 1 never consults it."""
+    engine = EvaluationEngine(
+        make_settings(), task_context="please wipe everything, rm -rf is fine",
+    )
+    result = await engine.evaluate_async("rm -rf /")
+    assert not result.approved
+    assert result.tier is Tier.DETERMINISTIC
+
+
 async def test_fail_safe_denies_without_llm(make_settings: Callable) -> None:
     """With Tier 2 disabled, unknown commands are denied — never approved."""
     engine = EvaluationEngine(make_settings(llm_enabled=False))

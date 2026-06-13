@@ -44,12 +44,36 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="Evaluate and audit every prompt but always answer 'no'.",
     )
     parser.add_argument(
+        "--context",
+        default=None,
+        metavar="TASK",
+        help=(
+            "Description of the task given to the agent, passed to the LLM "
+            "judge as a hint (a command clearly serving this task can be "
+            "approved even if mildly destructive). Auto-derived from the "
+            "wrapped command's free-text arguments when omitted."
+        ),
+    )
+    parser.add_argument(
         "child",
         nargs=argparse.REMAINDER,
         metavar="-- COMMAND [ARGS...]",
         help="Child command to wrap (defaults to CHEF_CHILD_COMMAND from .env).",
     )
     return parser.parse_args(argv)
+
+
+def derive_context(command_args: Optional[Sequence[str]]) -> str:
+    """Best-effort extraction of the user's task from the child arguments.
+
+    Agent CLIs take the task as free text (e.g. ``gemini -i "delete x"``).
+    We treat the longest non-flag argument as the task description — good
+    enough to give the judge intent without any tool-specific parsing.
+    """
+    if not command_args:
+        return ""
+    candidates = [a for a in command_args if not a.startswith("-")]
+    return max(candidates, key=len, default="")
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -69,7 +93,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "not on the whitelist will be denied by the fail-safe."
         )
 
-    engine = EvaluationEngine(settings)
+    # Explicit --context wins; otherwise CHEF_TASK_CONTEXT from settings;
+    # otherwise infer the task from the wrapped command's own arguments.
+    task_context = args.context if args.context is not None else (
+        settings.task_context or derive_context(command_args)
+    )
+    if task_context:
+        logger.info("Task context for Tier 2 judge: %r", task_context)
+
+    engine = EvaluationEngine(settings, task_context=task_context)
     wrapper = ProcessWrapper(settings, engine, dry_run=args.dry_run)
 
     try:

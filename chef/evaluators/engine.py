@@ -32,12 +32,16 @@ class EvaluationEngine:
         settings: ChefSettings,
         deterministic: Optional[DeterministicEvaluator] = None,
         llm: Optional[LLMEvaluator] = None,
+        task_context: str = "",
     ) -> None:
         self._settings = settings
         self._deterministic = deterministic or DeterministicEvaluator()
         self._llm = llm
         if self._llm is None and settings.llm_enabled and settings.llm_api_key:
             self._llm = LLMEvaluator(settings)
+        # The user's stated task, passed to Tier 2 as a hint. Falls back to
+        # the value baked into settings (CHEF_TASK_CONTEXT) when not given.
+        self._task_context = task_context or settings.task_context
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
@@ -62,7 +66,7 @@ class EvaluationEngine:
 
         if result.verdict is Verdict.UNKNOWN and self._llm is not None:
             logger.info("Tier 1 inconclusive; escalating to LLM: %r", command)
-            result = await self._llm.evaluate(command)
+            result = await self._llm.evaluate(command, self._task_context)
 
         if result.verdict is Verdict.UNKNOWN:
             result = Evaluation(
