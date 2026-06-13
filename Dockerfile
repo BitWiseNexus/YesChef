@@ -49,7 +49,7 @@ RUN apt-get update \
        > /etc/apt/sources.list.d/nodesource.list \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli \
     && npm cache clean --force \
     && apt-get purge -y curl gnupg \
     && apt-get autoremove -y \

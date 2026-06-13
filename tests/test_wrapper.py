@@ -97,6 +97,40 @@ def test_dry_run_never_approves(make_settings: Callable, capfd) -> None:
     assert "SKIPPED: cat README.md" in out  # ...but dry-run still answered 'n'
 
 
+def test_gemini_style_prompts(make_settings: Callable, capfd) -> None:
+    """Gemini CLI dialect: command embedded in the prompt, menu-style answers."""
+    wrapper = make_wrapper(make_settings, approve_response="1", deny_response="3")
+    result = wrapper.run(
+        command=sys.executable,
+        args=[MOCK_CLI, "--style", "gemini", "cat README.md", "rm -rf /"],
+    )
+
+    assert result.prompts_handled == 2
+    assert [d.approved for d in result.decisions] == [True, False]
+    assert [d.command for d in result.decisions] == ["cat README.md", "rm -rf /"]
+
+    out, _ = capfd.readouterr()
+    assert "EXECUTED: cat README.md" in out
+    assert "SKIPPED: rm -rf /" in out
+
+
+def test_codex_style_prompts(make_settings: Callable, capfd) -> None:
+    """Codex dialect: '$ cmd' line followed by 'Allow command?'."""
+    wrapper = make_wrapper(make_settings)
+    result = wrapper.run(
+        command=sys.executable,
+        args=[MOCK_CLI, "--style", "codex", "git diff", "sudo rm -rf /"],
+    )
+
+    assert result.prompts_handled == 2
+    assert [d.approved for d in result.decisions] == [True, False]
+    assert [d.command for d in result.decisions] == ["git diff", "sudo rm -rf /"]
+
+    out, _ = capfd.readouterr()
+    assert "EXECUTED: git diff" in out
+    assert "SKIPPED: sudo rm -rf /" in out
+
+
 def test_child_crash_is_handled_gracefully(make_settings: Callable) -> None:
     """An abrupt child exit (EOF) must surface its exit code, not raise."""
     from chef.core.wrapper import SessionStatus

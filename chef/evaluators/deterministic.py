@@ -41,6 +41,13 @@ DEFAULT_WHITELIST: Sequence[str] = (
     r"^pip\s+(list|show|freeze)(\s|$)",
     r"^python(3)?\s+--version$",
     r"^node\s+--version$",
+    # Gemini CLI tool dialogs: file reads/writes are confined to the
+    # sandboxed /workspace mount, so they are safe to auto-approve.
+    r"^writefile\s+writing\s+to\s",
+    r"^readfile\b",
+    r"^readfolder\b",
+    r"^findfiles\b",
+    r"^searchtext\b",
 )
 
 #: Destructive or privilege-escalating commands that are always denied.

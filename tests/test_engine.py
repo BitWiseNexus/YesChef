@@ -63,6 +63,21 @@ def test_sync_facade(make_settings: Callable) -> None:
     """`evaluate` (sync) must work from blocking code like the pexpect loop."""
     engine = EvaluationEngine(make_settings())
     assert engine.evaluate("cat x.txt").approved
+    engine.close()
+
+
+def test_sync_facade_repeated_calls_with_llm(make_settings: Callable) -> None:
+    """Regression: consecutive sync evaluations must reuse one event loop.
+
+    With ``asyncio.run`` per call, the LLM client's pooled connections stayed
+    bound to a closed loop and the second call raised
+    ``RuntimeError: Event loop is closed``.
+    """
+    engine = EvaluationEngine(make_settings(), llm=make_llm(make_settings, "SAFE"))
+    assert engine.evaluate("make build").approved
+    assert engine.evaluate("make test").approved
+    assert engine.evaluate("make lint").approved
+    engine.close()
 
 
 async def test_decisions_are_audited_as_json(make_settings: Callable, tmp_path) -> None:

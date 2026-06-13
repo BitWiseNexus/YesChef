@@ -1,7 +1,10 @@
 # Chef
 
 **Chef** is a sandboxed CLI wrapper that autonomously answers the `(y/n)` permission
-prompts of an interactive CLI tool (built for the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)).
+prompts of interactive AI coding agents — [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+[Codex CLI](https://developers.openai.com/codex/cli), and
+[Gemini CLI](https://github.com/google-gemini/gemini-cli) are installed in the
+sandbox out of the box, and any other prompt-driven CLI works via configuration.
 It spawns the child inside a pseudo-terminal, intercepts every permission prompt,
 evaluates the requested command through a two-tiered safety engine, and answers
 on your behalf — with every decision written to a JSON audit trail.
@@ -63,11 +66,32 @@ cp .env.example .env       # fill in CHEF_LLM_API_KEY and ANTHROPIC_API_KEY
 docker compose build
 docker compose run --rm chef                  # wraps `claude` in /workspace
 docker compose run --rm chef -- claude "fix the failing tests"
+docker compose run --rm chef -- codex "add input validation"
+docker compose run --rm chef -- gemini "write unit tests"
 docker compose run --rm chef --dry-run        # evaluate + audit, never approve
 ```
 
 The container drops all capabilities, forbids privilege escalation, runs as a
 non-root user, and mounts **only** `./dummy_workspace` → `/workspace`.
+
+## Supported tools
+
+Claude Code, Codex CLI, and Gemini CLI are all installed in the image. The
+default `CHEF_PROMPT_PATTERN` recognises all three tools' permission prompts;
+what differs per tool is how to *answer* them. Pick a profile in `.env`:
+
+| Tool | `CHEF_CHILD_COMMAND` | `CHEF_APPROVE_RESPONSE` | `CHEF_DENY_RESPONSE` | Credential |
+|---|---|---|---|---|
+| Claude Code | `claude` | `1` | `2` | `ANTHROPIC_API_KEY` |
+| Codex CLI | `codex` | `y` | `n` | `OPENAI_API_KEY` |
+| Gemini CLI | `gemini` | `1` | `3` | `GEMINI_API_KEY` |
+
+Any other interactive CLI can be wrapped by setting `CHEF_PROMPT_PATTERN` to
+match its prompt and, if its output format is unusual, adding a regex (with one
+capture group) to `CHEF_EXTRA_COMMAND_PATTERNS` so Chef can extract the command
+being requested. These TUIs evolve quickly — if prompts change format, run with
+`--dry-run` first and watch the audit log to confirm interception still works
+before letting Chef approve anything.
 
 ## Local development
 

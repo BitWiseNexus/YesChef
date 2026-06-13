@@ -16,7 +16,6 @@ Usage examples (inside the Docker sandbox)::
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import sys
 from typing import List, Optional, Sequence
@@ -76,7 +75,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     try:
         result = wrapper.run(command=command, args=command_args)
     finally:
-        asyncio.run(engine.aclose())
+        engine.close()
 
     if result.status is not SessionStatus.COMPLETED:
         logger.error("Session ended abnormally: %s", result.status.value)

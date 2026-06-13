@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Pattern, Sequence
@@ -32,14 +33,31 @@ from chef.evaluators.models import Evaluation
 
 logger = logging.getLogger("chef.core.wrapper")
 
-#: Regexes tried (in order) against the output preceding a prompt to recover
+#: Regexes tried (in order) against the output surrounding a prompt to recover
 #: the command awaiting approval. Each must expose one capture group.
 COMMAND_EXTRACTION_PATTERNS: Sequence[str] = (
-    r"About to (?:run|execute):?\s*`([^`]+)`",      # mock CLI / generic tools
+    r"Allow execution of:?\s*['\"]([^'\"]+)['\"]",   # Gemini CLI shell prompt
+    r"(WriteFile\s+Writing to\s+\S+)",               # Gemini CLI write-file dialog
+    r"About to (?:run|execute):?\s*`([^`]+)`",       # mock CLI / generic tools
     r"(?:Run|Execute)\s+`([^`]+)`",                  # "Run `git push`?"
-    r"Bash command[\s\S]*?\n\s{2,}(\S[^\n]*)",      # Claude Code tool panel
+    r"Bash command[\s\S]*?\n\s{2,}(\S[^\n]*)",       # Claude Code tool panel
+    r"(?:Shell|shell)\s*\(([^)]+)\)",                # Codex/Gemini tool-call line
     r"\$\s+(\S[^\n]*)\s*$",                          # trailing "$ cmd" line
 )
+
+#: ANSI escape sequences (CSI, OSC, DCS/SOS/PM/APC, and bare ESC+final) that
+#: TUI children emit; stripped before prompt-context analysis.
+ANSI_ESCAPE_RE: Pattern[str] = re.compile(
+    r"\x1b(?:\[[0-9;?]*[ -/]*[@-~]"          # CSI ... final byte
+    r"|\][^\x07\x1b]*(?:\x07|\x1b\\)"        # OSC ... BEL or ST
+    r"|[PX^_][^\x1b]*\x1b\\"                 # DCS / SOS / PM / APC ... ST
+    r"|[@-Z\\-_])"                           # two-byte escapes
+)
+
+#: Box-drawing, block, geometric and braille-spinner characters that TUI
+#: frames are drawn with (escaped: box drawing U+2500-25FF, braille U+2800-28FF,
+#: check marks and misc tool glyphs).
+TUI_DECOR_RE: Pattern[str] = re.compile(r"[─-◿⠀-⣿✓⊶]")
 
 
 class SessionStatus(str, Enum):
@@ -80,9 +98,15 @@ class ProcessWrapper:
         self._engine = engine
         self._dry_run = dry_run
         self._prompt_re: Pattern[str] = re.compile(settings.prompt_pattern)
+        # User-supplied patterns take precedence over the built-ins so a
+        # tool-specific format can override the generic fallbacks.
         self._extractors: List[Pattern[str]] = [
-            re.compile(p, re.MULTILINE) for p in COMMAND_EXTRACTION_PATTERNS
+            re.compile(p, re.MULTILINE)
+            for p in (*settings.extra_command_patterns, *COMMAND_EXTRACTION_PATTERNS)
         ]
+        # (command, monotonic timestamp) of the last answered prompt, used to
+        # ignore TUI redraws of a dialog that was already answered.
+        self._last_prompt: Optional[tuple[str, float]] = None
 
     def run(self, command: Optional[str] = None, args: Optional[Sequence[str]] = None) -> SessionResult:
         """Spawn the child and pump its output until it exits or stalls.
@@ -146,8 +170,9 @@ class ProcessWrapper:
             if index == 0:  # permission prompt detected
                 idle_timeouts = 0
                 evaluation = self._handle_prompt(child)
-                result.prompts_handled += 1
-                result.decisions.append(evaluation)
+                if evaluation is not None:  # None = ignored TUI redraw
+                    result.prompts_handled += 1
+                    result.decisions.append(evaluation)
 
             elif index == 1:  # EOF — child exited
                 child.close()
@@ -180,10 +205,23 @@ class ProcessWrapper:
                     result.exit_code = 124  # conventional timeout exit code
                     return result
 
-    def _handle_prompt(self, child: pexpect.spawn) -> Evaluation:
-        """Evaluate the intercepted command and answer the prompt."""
-        context: str = child.before or ""
+    def _handle_prompt(self, child: pexpect.spawn) -> Optional[Evaluation]:
+        """Evaluate the intercepted command and answer the prompt.
+
+        Returns ``None`` when the match was a TUI redraw of a prompt that
+        was already answered (no response is sent again).
+        """
+        # Include the matched prompt text itself: some tools (e.g. Gemini
+        # CLI's "Allow execution of: 'cmd'?") embed the command inside the
+        # prompt rather than in the output preceding it.
+        matched: str = child.match.group(0) if isinstance(child.match, re.Match) else ""
+        context: str = self._clean((child.before or "") + matched)
         command = self._extract_command(context)
+
+        if self._is_redraw(command):
+            logger.debug("Ignoring redraw of already-answered prompt: %r", command)
+            return None
+
         evaluation = self._engine.evaluate(command)
 
         approve = evaluation.approved and not self._dry_run
@@ -200,6 +238,29 @@ class ProcessWrapper:
         )
         child.sendline(response)
         return evaluation
+
+    def _is_redraw(self, command: str) -> bool:
+        """True if this prompt is a TUI re-render of the one just answered.
+
+        Full-screen TUIs (ink/react-based) repaint their approval dialog many
+        times — on every keystroke and resize — so the same prompt text can
+        match repeatedly in the stream. Answering twice would leak stray
+        keystrokes into the child, so identical commands seen within
+        ``prompt_dedupe_window`` seconds are ignored.
+        """
+        now = time.monotonic()
+        previous = self._last_prompt
+        self._last_prompt = (command, now)
+        return (
+            previous is not None
+            and previous[0] == command
+            and (now - previous[1]) < self._settings.prompt_dedupe_window
+        )
+
+    @staticmethod
+    def _clean(text: str) -> str:
+        """Strip ANSI escape sequences and TUI frame glyphs from output."""
+        return TUI_DECOR_RE.sub(" ", ANSI_ESCAPE_RE.sub("", text))
 
     def _extract_command(self, context: str) -> str:
         """Recover the command awaiting approval from pre-prompt output.

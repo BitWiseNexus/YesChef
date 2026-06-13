@@ -44,8 +44,23 @@ class ChefSettings(BaseSettings):
         description="Working directory for the child process (the sandboxed mount).",
     )
     prompt_pattern: str = Field(
-        default=r"\(y/n\)|\(Y/n\)|\[y/N\]|\[Y/n\]|Do you want to proceed\?",
+        default=(
+            r"\(y/n\)|\(Y/n\)|\[y/N\]|\[Y/n\]"
+            r"|Do you want to proceed\?"             # Claude Code
+            r"|Allow execution of:?\s*'[^']*'\??"    # Gemini CLI (shell)
+            r"|Apply this change\?"                  # Gemini CLI (edits)
+            r"|Allow command\?"                      # Codex CLI
+            r"|Would you like to run th(?:is|e following) command\?"
+        ),
         description="Regex that identifies a permission prompt in child output.",
+    )
+    extra_command_patterns: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Additional regexes (each with exactly one capture group) tried "
+            "BEFORE the built-ins when extracting the command awaiting "
+            "approval from the output around a prompt. JSON list in the env."
+        ),
     )
     approve_response: str = Field(
         default="y",
@@ -54,6 +69,14 @@ class ChefSettings(BaseSettings):
     deny_response: str = Field(
         default="n",
         description="Text sent to the child to deny a prompt.",
+    )
+    prompt_dedupe_window: float = Field(
+        default=2.0,
+        ge=0,
+        description=(
+            "Seconds within which an identical prompt (same extracted "
+            "command) is treated as a TUI redraw and not answered again."
+        ),
     )
     expect_timeout: float = Field(
         default=30.0,

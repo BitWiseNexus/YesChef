@@ -7,10 +7,16 @@ services:
     container_name: chef-sandbox
     env_file:
       - .env
+    environment:
+      # Advertise 256-color support to wrapped TUIs (Gemini CLI warns without it)
+      TERM: xterm-256color
     # The ONLY host filesystem the agent can touch. Everything destructive
     # it could ever be tricked into approving is confined to this folder.
     volumes:
       - ./dummy_workspace:/workspace
+      # Persists the wrapped tools' one-time setup (auth choice, theme, ...)
+      # in ~/.gemini, ~/.codex, ~/.claude across container runs.
+      - chef-home:/home/chef
     working_dir: /app
     stdin_open: true   # keep stdin open for the wrapped interactive CLI
     tty: true          # allocate a TTY so the child renders its prompts
@@ -23,3 +29,6 @@ services:
     mem_limit: 2g
     pids_limit: 256
     restart: "no"
+
+volumes:
+  chef-home:

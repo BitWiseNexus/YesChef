@@ -38,10 +38,23 @@ class EvaluationEngine:
         self._llm = llm
         if self._llm is None and settings.llm_enabled and settings.llm_api_key:
             self._llm = LLMEvaluator(settings)
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        """Lazily create the engine's private, long-lived event loop.
+
+        One loop must be reused across all sync calls: the LLM client's
+        connection pool is bound to the loop it first ran on, and resuming
+        it from a different loop raises ``RuntimeError: Event loop is
+        closed`` (which ``asyncio.run`` per call would guarantee).
+        """
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+        return self._loop
 
     def evaluate(self, command: str) -> Evaluation:
         """Synchronous facade for the pexpect event loop (which is blocking)."""
-        return asyncio.run(self.evaluate_async(command))
+        return self._get_loop().run_until_complete(self.evaluate_async(command))
 
     async def evaluate_async(self, command: str) -> Evaluation:
         """Evaluate ``command`` through both tiers and audit the result."""
@@ -69,3 +82,12 @@ class EvaluationEngine:
         """Dispose of tier resources (LLM connection pool)."""
         if self._llm is not None:
             await self._llm.aclose()
+
+    def close(self) -> None:
+        """Synchronous teardown: close the LLM client on its own loop."""
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.run_until_complete(self.aclose())
+            self._loop.close()
+        else:
+            asyncio.run(self.aclose())
+        self._loop = None
