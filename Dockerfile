@@ -60,6 +60,17 @@ RUN useradd --create-home --shell /bin/bash chef \
     && mkdir -p /workspace /app \
     && chown -R chef:chef /workspace /app
 
+# Disable Gemini CLI's "Do you trust this folder?" dialog. That prompt is not a
+# command-approval prompt, so Chef does not (and should not) answer it — and
+# since Chef owns stdin, an unanswered dialog would deadlock the session. The
+# whole container is already an isolated sandbox, so folder trust adds nothing.
+# NOTE: the chef-home volume shadows this file for pre-existing volumes; it only
+# takes effect for freshly created volumes (or `docker compose down -v`).
+RUN mkdir -p /home/chef/.gemini \
+    && printf '{"security":{"folderTrust":{"enabled":false}}}\n' \
+       > /home/chef/.gemini/settings.json \
+    && chown -R chef:chef /home/chef/.gemini
+
 COPY --from=builder /opt/venv /opt/venv
 
 WORKDIR /app
